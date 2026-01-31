@@ -60,7 +60,7 @@ export default function Dashboard() {
               <p className="text-sm text-gray-400 mb-2">Add these to your <code className="text-blue-400">.env.local</code> file:</p>
               <pre className="text-sm text-green-400 overflow-x-auto">
 {`NEXT_PUBLIC_SUPABASE_URL=your-project-url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key`}
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=your-anon-key`}
               </pre>
             </div>
             <p className="text-gray-400 text-sm">
