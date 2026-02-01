@@ -171,6 +171,7 @@ export async function DELETE(
     // Delete related records first (cascade)
     await supabase.from("mc_task_assignees").delete().eq("task_id", id);
     await supabase.from("mc_messages").delete().eq("task_id", id);
+    await supabase.from("mc_notifications").delete().eq("task_id", id);
 
     // Update activity records to remove task_id reference (keep history)
     await supabase
