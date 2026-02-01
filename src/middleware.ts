@@ -7,7 +7,10 @@ const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/api/health(.*)",
-  "/api/agents/heartbeat(.*)",
+  "/api/agents(.*)",      // All agent endpoints (heartbeat, list, etc.)
+  "/api/tasks(.*)",       // All task endpoints (CRUD)
+  "/api/messages(.*)",    // Messages endpoint
+  "/api/notify(.*)",      // Notifications endpoint
 ]);
 
 // Check if Clerk is configured
