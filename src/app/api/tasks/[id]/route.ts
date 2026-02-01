@@ -45,7 +45,7 @@ export async function GET(
 }
 
 // PATCH /api/tasks/[id] - Update task status/details
-// Body: { status?, priority?, agent_session? (for logging who made the change) }
+// Body: { status?, priority?, title?, description?, due_date?, agent_session?, message? }
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -53,13 +53,13 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { status, priority, agent_session, message } = body;
+    const { status, priority, title, description, due_date, agent_session, message } = body;
 
     const supabase = createServerClient();
 
     // Get agent if specified
     let agentId = null;
-    let agentName = "System";
+    let agentName = "Dashboard";
     if (agent_session) {
       const { data: agent } = await supabase
         .from("mc_agents")
@@ -87,8 +87,11 @@ export async function PATCH(
     const updateData: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     };
-    if (status) updateData.status = status;
-    if (priority) updateData.priority = priority;
+    if (status !== undefined) updateData.status = status;
+    if (priority !== undefined) updateData.priority = priority;
+    if (title !== undefined) updateData.title = title;
+    if (description !== undefined) updateData.description = description;
+    if (due_date !== undefined) updateData.due_date = due_date || null;
 
     // Update task
     const { data: task, error } = await supabase
@@ -111,13 +114,22 @@ export async function PATCH(
       });
     }
 
-    // Log activity
+    // Log activity for changes
     const changes: string[] = [];
-    if (status && status !== currentTask.status) {
+    if (status !== undefined && status !== currentTask.status) {
       changes.push(`status: ${currentTask.status} → ${status}`);
     }
-    if (priority && priority !== currentTask.priority) {
+    if (priority !== undefined && priority !== currentTask.priority) {
       changes.push(`priority: ${currentTask.priority} → ${priority}`);
+    }
+    if (title !== undefined && title !== currentTask.title) {
+      changes.push(`title updated`);
+    }
+    if (description !== undefined && description !== currentTask.description) {
+      changes.push(`description updated`);
+    }
+    if (due_date !== undefined && due_date !== currentTask.due_date) {
+      changes.push(`due date: ${due_date || "removed"}`);
     }
 
     if (changes.length > 0) {
@@ -132,6 +144,59 @@ export async function PATCH(
     return NextResponse.json({ task });
   } catch (err) {
     console.error("Task PATCH error:", err);
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+  }
+}
+
+// DELETE /api/tasks/[id] - Delete a task
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const supabase = createServerClient();
+
+    // Get current task for activity logging
+    const { data: currentTask } = await supabase
+      .from("mc_tasks")
+      .select("title")
+      .eq("id", id)
+      .single();
+
+    if (!currentTask) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
+
+    // Delete related records first (cascade)
+    await supabase.from("mc_task_assignees").delete().eq("task_id", id);
+    await supabase.from("mc_messages").delete().eq("task_id", id);
+
+    // Update activity records to remove task_id reference (keep history)
+    await supabase
+      .from("mc_activity")
+      .update({ task_id: null })
+      .eq("task_id", id);
+
+    // Delete the task
+    const { error } = await supabase
+      .from("mc_tasks")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // Log deletion activity
+    await supabase.from("mc_activity").insert({
+      activity_type: "task_deleted",
+      message: `Task deleted: "${currentTask.title}"`,
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("Task DELETE error:", err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }

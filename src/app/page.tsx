@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { createClient, isSupabaseConfigured, Agent, Task, Activity } from "@/lib/supabase";
+import { KanbanBoard } from "@/components/kanban";
+import { Modal } from "@/components/ui/Modal";
+import { Button } from "@/components/ui/Button";
+import { Input, Textarea, Select } from "@/components/ui/Input";
 
 export default function Dashboard() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -10,10 +14,18 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const [newTask, setNewTask] = useState({ title: "", description: "", priority: "medium", assignee_id: "" });
+  const [newTask, setNewTask] = useState({
+    title: "",
+    description: "",
+    priority: "medium",
+    assignee_id: "",
+    due_date: "",
+  });
   const [creating, setCreating] = useState(false);
+  const [showAgentPanel, setShowAgentPanel] = useState(true);
+  const [showActivityPanel, setShowActivityPanel] = useState(true);
 
-  async function fetchData() {
+  const fetchData = useCallback(async () => {
     if (!isSupabaseConfigured()) {
       setConfigError(true);
       setLoading(false);
@@ -25,8 +37,8 @@ export default function Dashboard() {
 
       const [agentsRes, tasksRes, activitiesRes] = await Promise.all([
         supabase.from("mc_agents").select("*").order("name"),
-        supabase.from("mc_tasks").select("*").order("created_at", { ascending: false }).limit(50),
-        supabase.from("mc_activity").select("*").order("created_at", { ascending: false }).limit(20),
+        supabase.from("mc_tasks").select("*").order("created_at", { ascending: false }).limit(100),
+        supabase.from("mc_activity").select("*").order("created_at", { ascending: false }).limit(30),
       ]);
 
       if (agentsRes.data) setAgents(agentsRes.data);
@@ -36,13 +48,49 @@ export default function Dashboard() {
       setConfigError(true);
     }
     setLoading(false);
-  }
+  }, []);
 
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchData]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in inputs
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+
+      // 'n' for new task
+      if (e.key === "n" && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        setShowForm(true);
+      }
+      // 'r' for refresh
+      if (e.key === "r" && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        fetchData();
+      }
+      // '1' toggle agents
+      if (e.key === "1") {
+        setShowAgentPanel((prev) => !prev);
+      }
+      // '2' toggle activity
+      if (e.key === "2") {
+        setShowActivityPanel((prev) => !prev);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [fetchData]);
 
   async function createTask(e: React.FormEvent) {
     e.preventDefault();
@@ -50,7 +98,7 @@ export default function Dashboard() {
 
     try {
       const supabase = createClient();
-      
+
       const { data: task, error } = await supabase
         .from("mc_tasks")
         .insert({
@@ -58,6 +106,7 @@ export default function Dashboard() {
           description: newTask.description || null,
           priority: newTask.priority,
           status: newTask.assignee_id ? "assigned" : "inbox",
+          due_date: newTask.due_date || null,
         })
         .select()
         .single();
@@ -74,12 +123,12 @@ export default function Dashboard() {
       if (task) {
         await supabase.from("mc_activity").insert({
           activity_type: "task_created",
-          message: `Nueva tarea: "${newTask.title}"`,
+          message: `New task: "${newTask.title}"`,
           task_id: task.id,
         });
       }
 
-      setNewTask({ title: "", description: "", priority: "medium", assignee_id: "" });
+      setNewTask({ title: "", description: "", priority: "medium", assignee_id: "", due_date: "" });
       setShowForm(false);
       fetchData();
     } catch (err) {
@@ -89,10 +138,69 @@ export default function Dashboard() {
     setCreating(false);
   }
 
+  // Task operations for KanbanBoard
+  const handleTaskUpdate = useCallback(async (taskId: string, updates: Partial<Task>) => {
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to update task");
+      }
+
+      // Optimistically update local state
+      setTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, ...updates, updated_at: new Date().toISOString() } : t))
+      );
+    } catch (err) {
+      console.error("Failed to update task:", err);
+      throw err;
+    }
+  }, []);
+
+  const handleTaskDelete = useCallback(async (taskId: string) => {
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to delete task");
+      }
+
+      // Remove from local state
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    } catch (err) {
+      console.error("Failed to delete task:", err);
+      throw err;
+    }
+  }, []);
+
+  const handleAddComment = useCallback(async (taskId: string, content: string) => {
+    try {
+      const supabase = createClient();
+      await supabase.from("mc_messages").insert({
+        task_id: taskId,
+        content,
+      });
+    } catch (err) {
+      console.error("Failed to add comment:", err);
+      throw err;
+    }
+  }, []);
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white p-8">
-        <div className="animate-pulse">Loading Mission Control...</div>
+      <div className="min-h-screen bg-gray-950 text-white p-8 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-400">Loading Mission Control...</p>
+        </div>
       </div>
     );
   }
@@ -101,15 +209,15 @@ export default function Dashboard() {
     return (
       <div className="min-h-screen bg-gray-950 text-white p-8">
         <div className="max-w-2xl mx-auto">
-          <h1 className="text-3xl font-bold mb-6">🚀 Mission Control Setup Required</h1>
+          <h1 className="text-3xl font-bold mb-6">Mission Control Setup Required</h1>
           <div className="bg-gray-900 rounded-lg p-6 border border-gray-800">
             <p className="text-gray-300 mb-4">
               Supabase is not configured. Add environment variables in Vercel.
             </p>
             <div className="bg-gray-800 rounded p-4 mb-4">
               <pre className="text-sm text-green-400 overflow-x-auto">
-{`NEXT_PUBLIC_SUPABASE_URL=https://pwcczlrjguvhvhnzupuv.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key`}
+{`NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=your-anon-key`}
               </pre>
             </div>
           </div>
@@ -118,229 +226,214 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key`}
     );
   }
 
-  const tasksByStatus = {
-    inbox: tasks.filter(t => t.status === "inbox" || t.status === "assigned"),
-    in_progress: tasks.filter(t => t.status === "in_progress"),
-    review: tasks.filter(t => t.status === "review"),
-    done: tasks.filter(t => t.status === "done"),
-  };
-
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="min-h-screen bg-gray-950 text-white flex flex-col">
       {/* Header */}
-      <header className="border-b border-gray-800 p-4 flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold">🚀 Mission Control</h1>
-          <p className="text-gray-400">DeHyl Agent Squad</p>
+      <header className="border-b border-gray-800 p-4 flex justify-between items-center flex-shrink-0">
+        <div className="flex items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-bold">Mission Control</h1>
+            <p className="text-gray-400 text-sm">DeHyl Agent Squad</p>
+          </div>
+          <div className="hidden md:flex gap-2 ml-4">
+            <button
+              onClick={() => setShowAgentPanel((prev) => !prev)}
+              className={`px-3 py-1 rounded text-sm transition ${
+                showAgentPanel ? "bg-blue-600" : "bg-gray-800"
+              }`}
+              title="Toggle Agents Panel (1)"
+            >
+              Agents
+            </button>
+            <button
+              onClick={() => setShowActivityPanel((prev) => !prev)}
+              className={`px-3 py-1 rounded text-sm transition ${
+                showActivityPanel ? "bg-blue-600" : "bg-gray-800"
+              }`}
+              title="Toggle Activity Panel (2)"
+            >
+              Activity
+            </button>
+          </div>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition"
-        >
-          + Nueva Tarea
-        </button>
+        <div className="flex items-center gap-3">
+          <span className="text-gray-500 text-sm hidden sm:block">
+            Press <kbd className="px-1.5 py-0.5 bg-gray-800 rounded text-xs">n</kbd> for new task
+          </span>
+          <Button onClick={() => setShowForm(true)}>+ New Task</Button>
+        </div>
       </header>
 
       {/* Task Creation Modal */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-900 rounded-lg p-6 w-full max-w-md border border-gray-700">
-            <h2 className="text-xl font-bold mb-4">Nueva Tarea</h2>
-            <form onSubmit={createTask} className="space-y-4">
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Título *</label>
-                <input
-                  type="text"
-                  value={newTask.title}
-                  onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 focus:border-blue-500 focus:outline-none"
-                  placeholder="Ej: Revisar invoices de Certified"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Descripción</label>
-                <textarea
-                  value={newTask.description}
-                  onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 h-24 focus:border-blue-500 focus:outline-none"
-                  placeholder="Detalles de la tarea..."
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Prioridad</label>
-                  <select
-                    value={newTask.priority}
-                    onChange={(e) => setNewTask({ ...newTask, priority: e.target.value })}
-                    className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2"
-                  >
-                    <option value="low">🟢 Baja</option>
-                    <option value="medium">🔵 Media</option>
-                    <option value="high">🟠 Alta</option>
-                    <option value="urgent">🔴 Urgente</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Asignar a</label>
-                  <select
-                    value={newTask.assignee_id}
-                    onChange={(e) => setNewTask({ ...newTask, assignee_id: e.target.value })}
-                    className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2"
-                  >
-                    <option value="">Sin asignar</option>
-                    {agents.map((agent) => (
-                      <option key={agent.id} value={agent.id}>
-                        {agent.name} ({agent.role})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="flex-1 bg-gray-700 hover:bg-gray-600 py-2 rounded transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={creating || !newTask.title}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 py-2 rounded disabled:opacity-50 transition"
-                >
-                  {creating ? "Creando..." : "Crear Tarea"}
-                </button>
-              </div>
-            </form>
+      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="New Task" size="md">
+        <form onSubmit={createTask} className="p-6 space-y-4">
+          <Input
+            label="Title *"
+            value={newTask.title}
+            onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+            placeholder="e.g., Review invoices from Certified"
+            required
+            autoFocus
+          />
+          <Textarea
+            label="Description"
+            value={newTask.description}
+            onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
+            placeholder="Task details..."
+            rows={3}
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <Select
+              label="Priority"
+              value={newTask.priority}
+              onChange={(e) => setNewTask({ ...newTask, priority: e.target.value })}
+              options={[
+                { value: "low", label: "Low" },
+                { value: "medium", label: "Medium" },
+                { value: "high", label: "High" },
+                { value: "urgent", label: "Urgent" },
+              ]}
+            />
+            <Select
+              label="Assign to"
+              value={newTask.assignee_id}
+              onChange={(e) => setNewTask({ ...newTask, assignee_id: e.target.value })}
+              options={[
+                { value: "", label: "Unassigned" },
+                ...agents.map((agent) => ({
+                  value: agent.id,
+                  label: `${agent.name} (${agent.role})`,
+                })),
+              ]}
+            />
           </div>
-        </div>
-      )}
+          <Input
+            label="Due Date"
+            type="date"
+            value={newTask.due_date}
+            onChange={(e) => setNewTask({ ...newTask, due_date: e.target.value })}
+          />
+          <div className="flex gap-3 pt-2">
+            <Button type="button" variant="secondary" onClick={() => setShowForm(false)} className="flex-1">
+              Cancel
+            </Button>
+            <Button type="submit" loading={creating} disabled={!newTask.title} className="flex-1">
+              Create Task
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
-      <div className="p-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden">
         {/* Agents Panel */}
-        <div className="lg:col-span-1">
-          <h2 className="text-lg font-semibold mb-4">👥 Agents ({agents.length})</h2>
-          <div className="space-y-3">
-            {agents.map((agent) => (
-              <div
-                key={agent.id}
-                className="bg-gray-900 rounded-lg p-4 border border-gray-800 hover:border-gray-700 transition"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{agent.name}</span>
-                  <span
-                    className={`px-2 py-1 rounded text-xs ${
-                      agent.status === "active"
-                        ? "bg-green-900 text-green-300"
-                        : agent.status === "blocked"
-                        ? "bg-red-900 text-red-300"
-                        : "bg-gray-800 text-gray-400"
-                    }`}
-                  >
-                    {agent.status}
-                  </span>
+        {showAgentPanel && (
+          <div className="w-64 border-r border-gray-800 p-4 overflow-y-auto flex-shrink-0 hidden lg:block">
+            <h2 className="text-sm font-semibold mb-3 text-gray-400 uppercase tracking-wide">
+              Agents ({agents.length})
+            </h2>
+            <div className="space-y-2">
+              {agents.map((agent) => (
+                <div
+                  key={agent.id}
+                  className="bg-gray-900 rounded-lg p-3 border border-gray-800 hover:border-gray-700 transition"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-medium text-sm">{agent.name}</span>
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        agent.status === "active"
+                          ? "bg-green-500"
+                          : agent.status === "blocked"
+                          ? "bg-red-500"
+                          : "bg-gray-500"
+                      }`}
+                      title={agent.status}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500">{agent.role}</p>
+                  {agent.last_heartbeat && (
+                    <p className="text-xs text-gray-600 mt-1">
+                      Last seen: {new Date(agent.last_heartbeat).toLocaleTimeString()}
+                    </p>
+                  )}
                 </div>
-                <p className="text-sm text-gray-500 mt-1">{agent.role}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Tasks Kanban */}
-        <div className="lg:col-span-2">
-          <h2 className="text-lg font-semibold mb-4">📋 Tasks ({tasks.length})</h2>
-          <div className="grid grid-cols-3 gap-4">
-            {/* Inbox */}
-            <div className="bg-gray-900 rounded-lg p-3 border border-gray-800 min-h-[250px]">
-              <h3 className="text-sm font-medium text-gray-400 mb-3">
-                📥 Inbox ({tasksByStatus.inbox.length})
-              </h3>
-              <div className="space-y-2">
-                {tasksByStatus.inbox.map((task) => (
-                  <TaskCard key={task.id} task={task} />
-                ))}
-              </div>
-            </div>
-
-            {/* In Progress */}
-            <div className="bg-gray-900 rounded-lg p-3 border border-gray-800 min-h-[250px]">
-              <h3 className="text-sm font-medium text-yellow-400 mb-3">
-                🔄 In Progress ({tasksByStatus.in_progress.length})
-              </h3>
-              <div className="space-y-2">
-                {tasksByStatus.in_progress.map((task) => (
-                  <TaskCard key={task.id} task={task} />
-                ))}
-              </div>
-            </div>
-
-            {/* Done */}
-            <div className="bg-gray-900 rounded-lg p-3 border border-gray-800 min-h-[250px]">
-              <h3 className="text-sm font-medium text-green-400 mb-3">
-                ✅ Done ({tasksByStatus.done.length})
-              </h3>
-              <div className="space-y-2">
-                {tasksByStatus.done.slice(0, 8).map((task) => (
-                  <TaskCard key={task.id} task={task} />
-                ))}
-              </div>
+              ))}
+              {agents.length === 0 && (
+                <p className="text-gray-500 text-sm">No agents registered</p>
+              )}
             </div>
           </div>
+        )}
+
+        {/* Kanban Board */}
+        <div className="flex-1 p-4 overflow-auto">
+          <KanbanBoard
+            tasks={tasks}
+            onTaskUpdate={handleTaskUpdate}
+            onTaskDelete={handleTaskDelete}
+            onAddComment={handleAddComment}
+            onRefresh={fetchData}
+          />
         </div>
 
-        {/* Activity Feed */}
-        <div className="lg:col-span-1">
-          <h2 className="text-lg font-semibold mb-4">📡 Activity</h2>
-          <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 max-h-[400px] overflow-y-auto">
+        {/* Activity Panel */}
+        {showActivityPanel && (
+          <div className="w-72 border-l border-gray-800 p-4 overflow-y-auto flex-shrink-0 hidden xl:block">
+            <h2 className="text-sm font-semibold mb-3 text-gray-400 uppercase tracking-wide">
+              Recent Activity
+            </h2>
             {activities.length === 0 ? (
               <p className="text-gray-500 text-sm">No activity yet</p>
             ) : (
               <div className="space-y-3">
                 {activities.map((activity) => (
-                  <div key={activity.id} className="text-sm border-b border-gray-800 pb-2 last:border-0">
-                    <p className="text-gray-300">{activity.message}</p>
-                    <p className="text-gray-600 text-xs mt-1">
-                      {new Date(activity.created_at).toLocaleString()}
-                    </p>
+                  <div
+                    key={activity.id}
+                    className="text-sm border-b border-gray-800 pb-3 last:border-0"
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="text-lg">
+                        {activity.activity_type === "task_created" && "📝"}
+                        {activity.activity_type === "task_updated" && "✏️"}
+                        {activity.activity_type === "task_deleted" && "🗑️"}
+                        {!["task_created", "task_updated", "task_deleted"].includes(
+                          activity.activity_type
+                        ) && "📡"}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-gray-300 leading-tight">{activity.message}</p>
+                        <p className="text-gray-600 text-xs mt-1">
+                          {new Date(activity.created_at).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
-        </div>
+        )}
       </div>
-    </div>
-  );
-}
 
-function TaskCard({ task }: { task: Task }) {
-  const priorityColors = {
-    low: "border-l-gray-600",
-    medium: "border-l-blue-500",
-    high: "border-l-orange-500",
-    urgent: "border-l-red-500",
-  };
-
-  const priorityEmoji = {
-    low: "🟢",
-    medium: "🔵",
-    high: "🟠",
-    urgent: "🔴",
-  };
-
-  return (
-    <div className={`bg-gray-800 rounded p-3 border-l-4 ${priorityColors[task.priority]} hover:bg-gray-750 transition`}>
-      <div className="flex items-start gap-2">
-        <span className="text-sm">{priorityEmoji[task.priority]}</span>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium leading-tight">{task.title}</p>
-          {task.description && (
-            <p className="text-xs text-gray-500 mt-1 line-clamp-2">{task.description}</p>
-          )}
-        </div>
-      </div>
+      {/* Keyboard Shortcuts Help */}
+      <footer className="border-t border-gray-800 px-4 py-2 text-xs text-gray-600 flex-shrink-0 hidden sm:block">
+        <span className="mr-4">
+          <kbd className="px-1 py-0.5 bg-gray-800 rounded">n</kbd> New task
+        </span>
+        <span className="mr-4">
+          <kbd className="px-1 py-0.5 bg-gray-800 rounded">r</kbd> Refresh
+        </span>
+        <span className="mr-4">
+          <kbd className="px-1 py-0.5 bg-gray-800 rounded">1</kbd> Toggle agents
+        </span>
+        <span className="mr-4">
+          <kbd className="px-1 py-0.5 bg-gray-800 rounded">2</kbd> Toggle activity
+        </span>
+        <span>
+          <kbd className="px-1 py-0.5 bg-gray-800 rounded">Esc</kbd> Close modal
+        </span>
+      </footer>
     </div>
   );
 }
