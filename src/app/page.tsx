@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { UserButton } from "@clerk/nextjs";
 import { createClient, isSupabaseConfigured, Agent, Task, Activity } from "@/lib/supabase";
 import { KanbanBoard } from "@/components/kanban";
 import { Modal } from "@/components/ui/Modal";
@@ -261,6 +262,14 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=your-anon-key`}
             Press <kbd className="px-1.5 py-0.5 bg-gray-800 rounded text-xs">n</kbd> for new task
           </span>
           <Button onClick={() => setShowForm(true)}>+ New Task</Button>
+          <UserButton
+            afterSignOutUrl="/sign-in"
+            appearance={{
+              elements: {
+                avatarBox: "w-9 h-9",
+              },
+            }}
+          />
         </div>
       </header>
 
