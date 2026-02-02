@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
+import { ToolAccessPanel } from "@/components/agents/ToolAccessPanel";
 
 interface Agent {
   id: string;
@@ -163,87 +164,22 @@ function SoulTab({ agent }: { agent: Agent }) {
 }
 
 function ToolsTab({ agent }: { agent: Agent }) {
-  const toolCategories = [
-    {
-      name: "Fs",
-      tools: ["read", "write", "edit", "apply_patch"],
-    },
-    {
-      name: "Runtime",
-      tools: ["exec", "process"],
-    },
-    {
-      name: "Web",
-      tools: ["web_search", "web_fetch"],
-    },
-    {
-      name: "Memory",
-      tools: ["memory_search", "memory_get"],
-    },
-    {
-      name: "Sessions",
-      tools: ["sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "agents_list"],
-    },
-    {
-      name: "UI",
-      tools: ["browser", "canvas"],
-    },
-    {
-      name: "Messaging",
-      tools: ["message", "tts"],
-    },
-  ];
+  const handleSave = async (tools: Record<string, boolean>) => {
+    try {
+      // TODO: Integrate with OpenClaw API when ready
+      console.log("Saving tools for agent:", agent.id, tools);
+      alert("Tool configuration saved! (OpenClaw integration pending)");
+    } catch (err) {
+      console.error("Error saving tools:", err);
+    }
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Quick Presets */}
-      <div className="bg-gray-800 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-gray-400 mb-3">Quick Presets</h3>
-        <div className="flex gap-2">
-          <button className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">
-            📊 Status
-          </button>
-          <button className="px-3 py-1.5 bg-gray-700 text-gray-300 rounded text-sm hover:bg-gray-600">
-            💻 Coding
-          </button>
-          <button className="px-3 py-1.5 bg-gray-700 text-gray-300 rounded text-sm hover:bg-gray-600">
-            💬 Messaging
-          </button>
-          <button className="px-3 py-1.5 bg-gray-700 text-gray-300 rounded text-sm hover:bg-gray-600">
-            🔓 Full
-          </button>
-        </div>
-      </div>
-
-      {/* Tool Categories */}
-      {toolCategories.map((category) => (
-        <div key={category.name} className="bg-gray-800 rounded-lg p-4">
-          <div className="flex justify-between items-center mb-3">
-            <h3 className="text-sm font-medium text-white">{category.name}</h3>
-            <span className="text-xs text-gray-500">0/{category.tools.length}</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            {category.tools.map((tool) => (
-              <div
-                key={tool}
-                className="flex items-center justify-between p-2 bg-gray-900 rounded"
-              >
-                <span className="text-sm text-gray-300">{tool}</span>
-                <button className="w-10 h-5 bg-gray-700 rounded-full relative">
-                  <span className="absolute left-1 top-1 w-3 h-3 bg-gray-500 rounded-full" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-
-      {/* Actions */}
-      <div className="flex gap-2">
-        <Button variant="secondary">Enable All</Button>
-        <Button variant="secondary">Disable All</Button>
-      </div>
-    </div>
+    <ToolAccessPanel
+      agentId={agent.id}
+      initialTools={{}}
+      onSave={handleSave}
+    />
   );
 }
 
