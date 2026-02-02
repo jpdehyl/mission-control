@@ -69,7 +69,7 @@ export function AgentCard({ agent, onClick, selected }: AgentCardProps) {
             <div className="text-sm text-gray-400">{agent.role}</div>
           )}
         </div>
-        <Badge variant={agent.status === "active" ? "success" : "secondary"}>
+        <Badge variant={agent.status === "active" ? "success" : "default"}>
           {agent.status}
         </Badge>
       </div>
