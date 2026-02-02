@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 
 interface Agent {
@@ -35,14 +36,20 @@ const agentEmojis: Record<string, string> = {
 };
 
 export function AgentCard({ agent, onClick, selected }: AgentCardProps) {
+  const router = useRouter();
   const emoji = agentEmojis[agent.name.toLowerCase()] || "🤖";
   const timeSinceHeartbeat = agent.last_heartbeat
     ? getTimeSince(new Date(agent.last_heartbeat))
     : "never";
+  
+  const handleClick = () => {
+    if (onClick) onClick();
+    router.push(`/agents/${agent.id}`);
+  };
 
   return (
     <div
-      onClick={onClick}
+      onClick={handleClick}
       className={`
         p-4 rounded-lg border cursor-pointer transition-all
         ${selected 
